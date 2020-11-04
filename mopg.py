@@ -11,19 +11,46 @@ from scipy.stats import binom
 
 env=SIR_env(calibration)
 
-def mopg(tasks,m,R):
+
+#----------MOPG-------------------
+#INPUT:
+#-env: enviroment
+#-tasks:group of tasks where each task has:
+#       - X_I: current infected
+#       - X_S: current Susceptible
+#       - pol: Current policy (1: lockdown, 0:no lockdown)  
+#       - w_I: Current weight for the objective to minimize infected 
+#       - w_L: Current weight value for the objective to minimize lockdowns
+# -currentF: has the information of the values for each objective
+#       - val_I: Current optimal value for the objective to minimize infected 
+#       - val_L: Current optimal value for the objective to minimize lockdowns
+#-m: number of iterations for mopg
+#OUTPUT:
+#-update tasks (policy)
+#-update F(values)
+def mopg(env,tasks,m,currentF):
     for i in range(len(tasks)):
         theTask=tasks[i]
-        F= evalPol(theTask.pol)
-        newPol = polGrad(theTask,m)
-        newF= evalPol(newPol)
+        newPol = polGrad(env,theTask,currentF,m)
+        currentF.val_I[theTask.X_I,theTask.X_S],currentF.val_L[theTask.X_I,theTask.X_S]= evalPol(newPol,env,theTask.X_I,theTask.X_S,currentF.val_I[theTask.X_I,theTask.X_S],currentF.val_L[theTask.X_I,theTask.X_S])
         theTask.pol=newPol
         tasks[i]=theTask
-    return tasks
+    return tasks,currentF
 
 
 
-
+#----------evalPol-------------------
+# Evaluate a policy and returns the values
+#INPUT:
+#-newPol:policy to evaluate
+#-env: enviroment
+#-X_I: current infected
+#-X_S: current Susceptible
+#-currentV_I: Current value for the objective to minimize infected 
+#-currentV_L: Current value for the objective to minimize lockdowns 
+#OUTPUT:
+#-val_I:New value for the objective to minimize infecte
+#-val_L:New value for the objective to minimize lockdowns 
 def evalPol(newPol,env,X_I,X_S,currentV_I,currenV_L):
     env.time_step(newPol)
     meanX_S, meanX_I, meanX_R = env.sample_stochastic()
@@ -64,11 +91,52 @@ def evalPol(newPol,env,X_I,X_S,currentV_I,currenV_L):
             if j==uppR:
                 probR=1-binom.cdf(j-1,uppR,env.gamma)
             
-            val_I+=probI*probR*currentV_I[X_I+i-j-1,X_S-i-1]
-            val_L+=probI*probR*currentV_L[X_I+i-j-1,X_S-i-1]
+            val_I+=0.97*probI*probR*currentV_I[X_I+i-j-1,X_S-i-1]
+            val_L+=0.97*probI*probR*currentV_L[X_I+i-j-1,X_S-i-1]
     
     return val_I,val_L
 
+#----------polGrad-------------------
+# Returns new policy
+#INPUT:
+#-env: enviroment
+#-tasks:group of tasks where each task has:
+#       - X_I: current infected
+#       - X_S: current Susceptible
+#       - pol: Current policy (1: lockdown, 0:no lockdown)  
+#       - w_I: Current weight for the objective to minimize infected 
+#       - w_L: Current weight value for the objective to minimize lockdowns
+# -currentF: has the information of the values for each objective
+#       - val_I: Current optimal value for the objective to minimize infected 
+#       - val_L: Current optimal value for the objective to minimize lockdowns
+#-m: number of iterations for mopg
+#OUTPUT:
+#-thePol:policy
 
-def polGrad(task,m):
+def polGrad(env,task,currentF,m):
+    thePol=task.pol
+    X_I=task.X_I
+    X_S=task.X_S
     
+    val_I=currentF.val_I[X_I,X_S]
+    val_L=currentF.val_L[X_I,X_S]
+    
+    for i in range(1,m):
+        #1 stands for lockdown, 0 no lockdown
+        valL_I,valL_L=evalPol(1,env,X_I,X_S,val_I,val_L)
+        valL=task.w_I*valL_I+task.w_L*valL_L
+        
+        valN_I,valN_L=evalPol(0,env,X_I,X_S,val_I,val_L)
+        
+        valN=task.w_I*valN_I+task.w_L*valN_L
+        
+        if valL<=valN:
+            thePol=1
+            val_I=valL_I
+            val_L=valL_L
+        else:
+            thePol=0
+            val_I=valN_I
+            val_L=valN_L
+    
+    return thePol
