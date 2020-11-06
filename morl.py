@@ -15,6 +15,7 @@ from population import Population
 from opt_graph import OptGraph
 
 import torch.optim as optim
+from multiprocessing import Process, Queue, Event
 
 '''
 Each Sample is a policy which contains the actor_critic, agent status and running mean std info.
@@ -113,13 +114,147 @@ def run(args):
     opt_graph = OptGraph()
     
     selected_tasks, scalarization_batch = initialize_warmup_batch(args, device)
-    for sample, scalarization in zip(elite_batch, scalarization_batch):
+    rl_num_updates = args.warmup_iter
+    for sample, scalarization in zip(selected_tasks, scalarization_batch):
         sample.optgraph_id = opt_graph.insert(deepcopy(scalarization.weights), deepcopy(sample.objs), -1)
+
+    episode = 0
+    iteration = 0
+    while iteration < total_num_updates:
+        if episode == 0:
+            print_info('\n------------------------------- Warm-up Stage -------------------------------')    
+        else:
+            print_info('\n-------------------- Evolutionary Stage: Generation {:3} --------------------'.format(episode))
+
+        episode += 1
+        
+        offspring_batch = np.array([])
+
+        # --------------------> RL Optimization <-------------------- #
+        # compose task for each elite
+        task_batch = []
+        for selected, scalarization in \
+                zip(selected_tasks, scalarization_batch):
+            task_batch.append(Task(selected, scalarization)) # each task is a (policy, weight)
+
+
+        # Parallel computation for MOPG
+        processes = []
+        results_queue = Queue()
+        finished_event = Event()
     
-    # Warm-up
+        for task_id, task in enumerate(task_batch):
+            worker = Process(target=, args=) 
+            worker.start()
+            processes.append(worker)
 
+        # collect MOPG results for offsprings and insert objs into objs buffer
+        all_offspring_batch = [[] for _ in range(len(processes))]
+        cnt_done_workers = 0
+        while cnt_done_workers < len(processes):
+            rl_results = results_queue.get()
+            task_id, offsprings = rl_results['task_id'], rl_results['offspring_batch']
+            for sample in offsprings:
+                all_offspring_batch[task_id].append(Sample.copy_from(sample))
+            if rl_results['done']:
+                cnt_done_workers += 1
+        
+        # put all intermediate policies into all_sample_batch for EP update
+        all_sample_batch = [] 
+        # store the last policy for each optimization weight for RA
+        last_offspring_batch = [None] * len(processes) 
+        # only the policies with iteration % update_iter = 0 are inserted into offspring_batch for population update
+        # after warm-up stage, it's equivalent to the last_offspring_batch
+        offspring_batch = [] 
+        for task_id in range(len(processes)):
+            offsprings = all_offspring_batch[task_id]
+            prev_node_id = task_batch[task_id].sample.optgraph_id
+            opt_weights = deepcopy(task_batch[task_id].scalarization.weights).detach().numpy()
+            for i, sample in enumerate(offsprings):
+                all_sample_batch.append(sample)
+                if (i + 1) % args.update_iter == 0:
+                    prev_node_id = opt_graph.insert(opt_weights, deepcopy(sample.objs), prev_node_id)
+                    sample.optgraph_id = prev_node_id
+                    offspring_batch.append(sample)
+            last_offspring_batch[task_id] = offsprings[-1]
 
-    # Evolution
+        finished_event.set()
 
+        # ----------------------> Update EP <------------------------ #
+        ep.update(all_sample_batch)
+        population.update(offspring_batch)
 
-    # Policy choice 
+        # ------------------- > Task Selection <--------------------- #
+
+        selected_tasks, scalarization_batch, predicted_offspring_objs = \
+            population.prediction_guided_selection(args, iteration, ep, opt_graph, scalarization_template)
+
+        print_info('Selected Tasks:')
+        for i in range(len(selected_tasks)):
+            print_info('objs = {}, weight = {}'.format(selected_tasks[i].objs, scalarization_batch[i].weights))
+
+        iteration = min(iteration + rl_num_updates, total_num_updates)
+
+        rl_num_updates = args.update_iter
+
+        # ----------------------> Save Results <---------------------- #
+        # save ep
+        ep_dir = os.path.join(args.save_dir, str(iteration), 'ep')
+        os.makedirs(ep_dir, exist_ok = True)
+        with open(os.path.join(ep_dir, 'objs.txt'), 'w') as fp:
+            for obj in ep.obj_batch:
+                fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*obj))
+
+        # save population
+        population_dir = os.path.join(args.save_dir, str(iteration), 'population')
+        os.makedirs(population_dir, exist_ok = True)
+        with open(os.path.join(population_dir, 'objs.txt'), 'w') as fp:
+            for sample in population.sample_batch:
+                fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(sample.objs)))
+        # save optgraph and node id for each sample in population
+        with open(os.path.join(population_dir, 'optgraph.txt'), 'w') as fp:
+            fp.write('{}\n'.format(len(opt_graph.objs)))
+            for i in range(len(opt_graph.objs)):
+                fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + ';{:5f}' + (args.obj_num - 1) * ',{:5f}' + ';{}\n')\
+                         .format(*(opt_graph.weights[i]), *(opt_graph.objs[i]), opt_graph.prev[i]))
+            fp.write('{}\n'.format(len(population.sample_batch)))
+            for sample in population.sample_batch:
+                fp.write('{}\n'.format(sample.optgraph_id))
+
+        # save selected tasks
+        elite_dir = os.path.join(args.save_dir, str(iteration), 'elites')
+        os.makedirs(elite_dir, exist_ok = True)
+        with open(os.path.join(elite_dir, 'elites.txt'), 'w') as fp:
+            for elite in selected_tasks:
+                fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(elite.objs)))
+        with open(os.path.join(elite_dir, 'weights.txt'), 'w') as fp:
+            for scalarization in scalarization_batch:
+                fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(scalarization.weights)))
+        if args.selection_method == 'prediction-guided':
+            with open(os.path.join(elite_dir, 'predictions.txt'), 'w') as fp:
+                for objs in predicted_offspring_objs:
+                    fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(objs)))
+        with open(os.path.join(elite_dir, 'offsprings.txt'), 'w') as fp:
+            for i in range(len(all_offspring_batch)):
+                for j in range(len(all_offspring_batch[i])):
+                    fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(all_offspring_batch[i][j].objs)))
+
+    # ----------------------> Save Final Model <---------------------- 
+
+    os.makedirs(os.path.join(args.save_dir, 'final'), exist_ok = True)
+
+    # save ep policies
+    for i, sample in enumerate(ep.sample_batch):
+        torch.save(sample.actor_critic.state_dict(), os.path.join(args.save_dir, 'final', 'EP_policy_{}.pt'.format(i)))
+    
+    # save all ep objectives
+    with open(os.path.join(args.save_dir, 'final', 'objs.txt'), 'w') as fp:
+        for i, obj in enumerate(ep.obj_batch):
+            fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(obj)))
+
+    # # save all ep env_params
+    # if args.obj_rms:
+    #     with open(os.path.join(args.save_dir, 'final', 'env_params.txt'), 'w') as fp:
+    #         for sample in ep.sample_batch:
+    #             fp.write('obj_rms: mean: {} var: {}\n'.format(sample.env_params['obj_rms'].mean, sample.env_params['obj_rms'].var))
+
