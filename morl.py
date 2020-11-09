@@ -46,6 +46,7 @@ class Sample:
         self.agent.optimizer.load_state_dict(optim_state_dict)
 
 
+# TODO: fix this
 def initialize_warmup_batch(args, device):
     """
     Training policies during warmup stage
