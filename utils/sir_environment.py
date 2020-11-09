@@ -8,6 +8,8 @@ Created on 2020-11-07
 @email:   chen.andy14@gmail.com, andych@umich.edu
 """
 
+import numpy as np
+
 class SIR_env(object):
   def __init__(self, model_calibration=None):
     '''
@@ -53,7 +55,16 @@ class SIR_env(object):
       self.M = None
       print("Use setup method to define model parameters.")
 
-  def setup(self, beta=None, gamma=None, M=None):
+  def setup(self, X_S0=None, X_I0=None, X_R0=None, beta=None, gamma=None, M=None):
+    if X_S0 is not None:
+      self.X_S_true = np.array([X_S0]).astype(int)
+      self.X_S = np.array([X_S0]).astype(int)
+    if X_I0 is not None:
+      self.X_I_true = np.array([X_I0]).astype(int)
+      self.X_I = np.array([X_I0]).astype(int)
+    if X_R0 is not None:
+      self.X_R_true = np.array([X_R0]).astype(int)
+      self.X_R = np.array([X_R0]).astype(int)
     if beta is not None:
       self.beta = beta
     if gamma is not None:
@@ -82,9 +93,9 @@ class SIR_env(object):
     assert self.M is not None
 
     # mean population transition from X_S to X_I
-    mean_e_I_new = np.floor(self.beta[action]*self.X_S[-1]*self.X_I[-1]/self.M)
+    mean_e_I_new = int(np.floor(self.beta[action]*self.X_S_true[-1]*self.X_I_true[-1]/self.M))
     # mean population transition from X_I to X_R
-    mean_e_R_new = np.floor(self.gamma*self.X_I[-1])
+    mean_e_R_new = int(np.floor(self.gamma*self.X_I_true[-1]))
 
     # new mean populations
     X_S_new = self.X_S_true[-1] - mean_e_I_new
@@ -97,9 +108,16 @@ class SIR_env(object):
     std_X_I_new = np.sqrt(std_X_S_new**2 + std_X_R_new**2)
 
     # update X lists and std lists
-    self.X_S_true = np.append(self.X_S, X_S_new)
-    self.X_I_true = np.append(self.X_I, X_I_new)
-    self.X_R_true = np.append(self.X_R, X_R_new)
+    self.X_S_true = np.append(self.X_S_true, X_S_new)
+    self.X_I_true = np.append(self.X_I_true, X_I_new)
+    self.X_R_true = np.append(self.X_R_true, X_R_new)
+
+    self.X_S = np.append(self.X_S, int(np.random.normal(self.X_S_true[-1],self.std_X_S[-1])))
+    temp_X_R = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
+    while (self.M - self.X_S[-1] - temp_X_R) < 0:    # ensure X_I >= 0
+      temp_X_R = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
+    self.X_R = np.append(self.X_R, temp_X_R)
+    self.X_I = np.append(self.X_I, self.M - self.X_S[-1] - self.X_R[-1])
 
     self.std_X_S = np.append(self.std_X_S, np.sqrt(self.std_X_S[-1]**2 + std_X_S_new**2))
     self.std_X_I = np.append(self.std_X_I, np.sqrt(self.std_X_I[-1]**2 + std_X_I_new**2))
@@ -139,7 +157,9 @@ class SIR_env(object):
     - X_R_samp:               the most recently calculated X_R
 
     '''
-    X_S_samp = np.random.normal(self.X_S_true[-1],self.std_X_S[-1])
-    X_R_samp = np.random.normal(self.X_R_true[-1],self.std_X_R[-1])
+    X_S_samp = int(np.random.normal(self.X_S_true[-1],self.std_X_S[-1]))
+    X_R_samp = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
+    while (self.M - X_S_samp - X_R_samp) < 0:     # ensure X_I >= 0
+      X_R_samp = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
     X_I_samp = self.M - X_S_samp - X_R_samp
     return X_S_samp, X_I_samp, X_R_samp
