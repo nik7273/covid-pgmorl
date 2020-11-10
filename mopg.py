@@ -5,6 +5,14 @@ Created on Thu Oct 29 14:55:46 2020
 @author: dfotero, devrajn
 """
 
+from a2c_ppo_acktr import algo, utils
+from a2c_ppo_acktr.model import Policy
+from a2c_ppo_acktr.storage import RolloutStorage
+
+from vectorized_envs import make_env, make_vec_envs # differs from a2c_ppo_acktr
+
+from sample import Sample
+
 import numpy as np
 from scipy.stats import poisson
 from scipy.stats import binom
@@ -153,5 +161,12 @@ def polGrad(env,task,currentF,m):
 #-done_event: signal waiting to multiprocess allocator
 
 def mopg_worker(args, task_id, task, device, iteration, num_updates, start_time, results_queue, done_event):
-    # TODO: reimplement
+
+    # actor_critic = task.sample.actor_critic
+    # agent = task.sample.agent
     pass
+    
+    
+    
+    # TODO: reimplement
+    
