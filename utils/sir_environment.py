@@ -112,9 +112,14 @@ class SIR_env(object):
     self.X_I_true = np.append(self.X_I_true, X_I_new)
     self.X_R_true = np.append(self.X_R_true, X_R_new)
 
-    self.X_S = np.append(self.X_S, int(np.random.normal(self.X_S_true[-1],self.std_X_S[-1])))
+    # ensure X_S is monotonically decreasing or equal
+    temp_X_S = int(np.random.normal(self.X_S_true[-1],self.std_X_S[-1]))
+    while (temp_X_S > self.X_S[-1]):
+      temp_X_S = int(np.random.normal(self.X_S_true[-1],self.std_X_S[-1]))
+    self.X_S = np.append(self.X_S, temp_X_S)
+    # ensure X_I >= 0 and X_R is monotonically increasing or equal
     temp_X_R = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
-    while (self.M - self.X_S[-1] - temp_X_R) < 0:    # ensure X_I >= 0
+    while (((self.M - temp_X_S - temp_X_R) < 0) or (temp_X_R < self.X_R[-1])):
       temp_X_R = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
     self.X_R = np.append(self.X_R, temp_X_R)
     self.X_I = np.append(self.X_I, self.M - self.X_S[-1] - self.X_R[-1])
@@ -147,7 +152,7 @@ class SIR_env(object):
     '''
     return self.std_X_S[-1], self.std_X_I[-1], self.std_X_R[-1]
 
-  def sampleStochastic(self):
+  def sampleStochastic(self, last_X_S=None, last_X_R=None):
     '''
     Samples a set of the most recently calculated X_S, X_I, and X_R values (assuming CLT).
 
@@ -158,8 +163,18 @@ class SIR_env(object):
 
     '''
     X_S_samp = int(np.random.normal(self.X_S_true[-1],self.std_X_S[-1]))
+    # ensure X_S is monotonically decreasing or equal
+    if last_X_S is not None:
+      while (X_S_samp > last_X_S):
+        X_S_samp = int(np.random.normal(self.X_S_true[-1],self.std_X_S[-1]))
     X_R_samp = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
-    while (self.M - X_S_samp - X_R_samp) < 0:     # ensure X_I >= 0
-      X_R_samp = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
+    # ensure X_I >= 0
+    if last_X_R is not None:
+      # ensure X_R is monotonically increasing or equal
+      while ((self.M - X_S_samp - X_R_samp) < 0) or (X_R_samp < last_X_R):
+        X_R_samp = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
+    else:
+      while ((self.M - X_S_samp - X_R_samp) < 0):
+        X_R_samp = int(np.random.normal(self.X_R_true[-1],self.std_X_R[-1]))
     X_I_samp = self.M - X_S_samp - X_R_samp
     return X_S_samp, X_I_samp, X_R_samp

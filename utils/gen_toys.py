@@ -123,7 +123,7 @@ class GenToys(object):
     for ii in range(1,len(actions)):
       self.sir_env.timeStep(actions[ii])
       for jj in range(n):
-        X_S[jj,ii] , X_I[jj,ii], X_R[jj,ii] = self.sir_env.sampleStochastic()
+        X_S[jj,ii] , X_I[jj,ii], X_R[jj,ii] = self.sir_env.sampleStochastic(last_X_S=X_S[jj,ii-1], last_X_R=X_R[jj,ii-1])
 
 
     if savefile:
@@ -150,9 +150,13 @@ def main():
   gt = GenToys(sir_env)
   gt.loadConfig(args.filename)
   gt.setup()
-  print(gt.genDeterministicToy(savefile=True))
+  deterministictoy = gt.genDeterministicToy(savefile=True)
+  print(deterministictoy)
   gt.setup()
-  print(gt.genStochasticToy(n=10, savefile=True))
+  stochastictoy = gt.genStochasticToy(n=10, savefile=True)
+  print(stochastictoy)
+  #print(np.all((stochastictoy[0][0,:-1] - stochastictoy[0][0,1:]) >= 0))
+  #print(np.all((stochastictoy[2][0,1:] - stochastictoy[2][0,:-1]) >= 0))
   
 
 
