@@ -17,7 +17,6 @@ from opt_graph import OptGraph
 import torch.optim as optim
 from multiprocessing import Process, Queue, Event
 
-
 def generate_weights_batch_dfs(i, obj_num, min_weight, max_weight, delta_weight, weight, weights_batch):
     if i == obj_num - 1:
         weight.append(1.0 - np.sum(weight[0:i]))
@@ -31,7 +30,14 @@ def generate_weights_batch_dfs(i, obj_num, min_weight, max_weight, delta_weight,
         weight = weight[0:i]
         w += delta_weight
 
-
+'''
+Define a MOPG task, which is a pair of a policy and a scalarization weight.
+'''
+class Task:
+    def __init__(self, sample, scalarization):
+        self.sample = Sample.copy_from(sample)
+        self.scalarization = deepcopy(scalarization)
+        
 '''
 Each Sample is a policy which contains the actor_critic, agent status and running mean std info.
 The algorithm can pick any sample to resume its training process or train with another optimization direction
@@ -39,27 +45,21 @@ through those information.
 Each Sample is indexed by a unique optgraph_id
 '''
 class Sample:
-    def __init__(self, actor_critic, agent, objs = None, optgraph_id = None):
-        self.actor_critic = actor_critic
-        self.agent = agent
-        self.link_policy_agent()
+    def __init__(self, objs = None, optgraph_id = None):
         self.objs = objs
+        self.X_I = 0
+        self.X_S = 0 
+        self.val_I = []
+        self.val_L = []
+        self.policy = -1
+        
         self.optgraph_id = optgraph_id
 
     @classmethod
     def copy_from(cls, sample):
-        actor_critic = deepcopy(sample.actor_critic)
-        agent = deepcopy(sample.agent)
         objs = deepcopy(sample.objs)
         optgraph_id = sample.optgraph_id
-        return cls(actor_critic, agent, objs, optgraph_id)
-
-    def link_policy_agent(self):
-        self.agent.actor_critic = self.actor_critic
-        optim_state_dict = deepcopy(self.agent.optimizer.state_dict())
-        self.agent.optimizer = optim.Adam(self.actor_critic.parameters(), lr = 3e-4, eps = 1e-5)
-        self.agent.optimizer.load_state_dict(optim_state_dict)
-
+        return cls(agent, objs, optgraph_id)
 
 # TODO: fix this
 def initialize_warmup_batch(args, device):
@@ -76,29 +76,11 @@ def initialize_warmup_batch(args, device):
     temp_env = SIR_env(args.model_cal) # temp_env is only used for initialization
 
     for weights in weights_batch:
-        actor_critic = Policy(
-            temp_env.observation_space.shape,
-            temp_env.action_space,
-            base_kwargs={'layernorm' : args.layernorm},
-            obj_num=args.obj_num)
-
-        actor_critic.to(device).double()
-
-        agent = algo.PPO(
-            actor_critic,
-            args.clip_param,
-            args.ppo_epoch,
-            args.num_mini_batch,
-            args.value_loss_coef,
-            args.entropy_coef,
-            lr=args.lr,
-            eps=1e-5,
-            max_grad_norm=args.max_grad_norm)
-
+        
         scalarization = WeightedSumScalarization(num_objs = args.obj_num, weights = weights)
 
-        sample = Sample(actor_critic, agent, optgraph_id = -1)
-        objs = evaluation(args, sample)
+        sample = Sample(optgraph_id = -1)
+        objs = evaluate_policy(args, temp_env, sample)
         sample.objs = objs
 
         sample_batch.append(sample)
