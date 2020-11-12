@@ -39,10 +39,7 @@ class Task:
         self.scalarization = deepcopy(scalarization)
         
 '''
-Each Sample is a policy which contains the actor_critic, agent status and running mean std info.
-The algorithm can pick any sample to resume its training process or train with another optimization direction
-through those information.
-Each Sample is indexed by a unique optgraph_id
+Sample is a policy with associated environment variables.
 '''
 class Sample:
     def __init__(self, objs = None, optgraph_id = None):
