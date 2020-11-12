@@ -2,7 +2,7 @@
 """
 Created on Thu Oct 29 14:55:46 2020
 
-@author: dfotero, devrajn
+@author: dfotero
 """
 
 import numpy as np
@@ -10,6 +10,7 @@ from scipy.stats import poisson
 from scipy.stats import binom
 
 env=SIR_env(calibration)
+
 
 #----------MOPG-------------------
 #INPUT:
@@ -20,22 +21,23 @@ env=SIR_env(calibration)
 #       - pol: Current policy (1: lockdown, 0:no lockdown)  
 #       - w_I: Current weight for the objective to minimize infected 
 #       - w_L: Current weight value for the objective to minimize lockdowns
-# -currentF: has the information of the values for each objective
 #       - val_I: Current optimal value for the objective to minimize infected 
 #       - val_L: Current optimal value for the objective to minimize lockdowns
 #-m: number of iterations for mopg
 #OUTPUT:
 #-update tasks (policy)
 #-update F(values)
-def mopg(env,tasks,m,currentF):
+def mopg(env,tasks,m):
+    newTasks=tasks
     for i in range(len(tasks)):
-        theTask=tasks[i]
-        newPol = polGrad(env,theTask,currentF,m)
-        currentF.val_I[theTask.X_I,theTask.X_S], currentF.val_L[theTask.X_I,theTask.X_S] =\
-          evalPol(newPol,env,theTask.X_I,theTask.X_S,currentF.val_I[theTask.X_I,theTask.X_S],currentF.val_L[theTask.X_I,theTask.X_S])
-        theTask.pol=newPol
-        tasks[i]=theTask
-    return tasks,currentF
+        theTask=newTasks[i]
+        newPol = polGrad(env,theTask,m)
+        theTask.val_I[theTask.X_I,theTask.X_S],theTask.val_L[theTask.X_I,theTask.X_S]= evalPol(newPol,env,theTask.X_I,theTask.X_S,theTask.val_I[theTask.X_I,theTask.X_S],theTask.val_L[theTask.X_I,theTask.X_S])
+        theTask.pol[theTask.X_I,theTask.X_S]=newPol
+        newTasks[i]=theTask
+    return tasks
+
+
 
 #----------evalPol-------------------
 # Evaluate a policy and returns the values
@@ -47,9 +49,9 @@ def mopg(env,tasks,m,currentF):
 #-currentV_I: Current value for the objective to minimize infected 
 #-currentV_L: Current value for the objective to minimize lockdowns 
 #OUTPUT:
-#-val_I:New value for the objective to minimize infected
+#-val_I:New value for the objective to minimize infecte
 #-val_L:New value for the objective to minimize lockdowns 
-def evalPol(newPol,env,X_I,X_S,currentV_I,currenV_L):
+def evalPol(newPol,env,X_I,X_S,currentV_I,currentV_L):
     env.time_step(newPol)
     meanX_S, meanX_I, meanX_R = env.sample_stochastic()
     errX_S, errX_I, errX_R = env.get_error()
@@ -111,13 +113,13 @@ def evalPol(newPol,env,X_I,X_S,currentV_I,currenV_L):
 #OUTPUT:
 #-thePol:policy
 
-def polGrad(env,task,currentF,m):
+def polGrad(env,task,m):
     thePol=task.pol
     X_I=task.X_I
     X_S=task.X_S
     
-    val_I=currentF.val_I[X_I,X_S]
-    val_L=currentF.val_L[X_I,X_S]
+    val_I=task.val_I[X_I,X_S]
+    val_L=task.val_L[X_I,X_S]
     
     for i in range(1,m):
         #1 stands for lockdown, 0 no lockdown
@@ -138,20 +140,3 @@ def polGrad(env,task,currentF,m):
             val_L=valN_L
     
     return thePol
-
-#------------mopg_worker------------------#
-# Runs MOPG for a candidate task
-# INPUT:
-#-args: top-level arguments
-#-task_id: unique task identification
-#-task: (policy, weight) pair
-#-device: device for torch
-#-iteration: iteration of the evolutionary algorithm (Alg. 1)
-#-num_updates: number of optim steps
-#-start_time: time started worker
-#-results_queue: offspring for worker (for multiprocessing)
-#-done_event: signal waiting to multiprocess allocator
-
-def mopg_worker(args, task_id, task, device, iteration, num_updates, start_time, results_queue, done_event):
-    # TODO: reimplement
-    pass

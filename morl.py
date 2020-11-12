@@ -10,12 +10,27 @@ from a2c_ppo_acktr.model import Policy
 
 from utils import generate_weights_batch_dfs
 from scalarization_methods import WeightedSumScalarization
-from mopg import evaluation
+from mopg import evaluation, mopg_worker
 from population import Population
 from opt_graph import OptGraph
 
 import torch.optim as optim
 from multiprocessing import Process, Queue, Event
+
+
+def generate_weights_batch_dfs(i, obj_num, min_weight, max_weight, delta_weight, weight, weights_batch):
+    if i == obj_num - 1:
+        weight.append(1.0 - np.sum(weight[0:i]))
+        weights_batch.append(deepcopy(weight))
+        weight = weight[0:i]
+        return
+    w = min_weight
+    while w < max_weight + 0.5 * delta_weight and np.sum(weight[0:i]) + w < 1.0 + 0.5 * delta_weight:
+        weight.append(w)
+        generate_weights_batch_dfs(i + 1, obj_num, min_weight, max_weight, delta_weight, weight, weights_batch)
+        weight = weight[0:i]
+        w += delta_weight
+
 
 '''
 Each Sample is a policy which contains the actor_critic, agent status and running mean std info.
@@ -107,7 +122,7 @@ def run(args):
 
     # Initialization
     scalarization_template = WeightedSumScalarization(num_objs = args.obj_num, weights = np.ones(args.obj_num) / args.obj_num)
-    total_num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes    
+    total_num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
     start_time = time.time()
     
     external_pareto = EP()
@@ -138,14 +153,14 @@ def run(args):
                 zip(selected_tasks, scalarization_batch):
             task_batch.append(Task(selected, scalarization)) # each task is a (policy, weight)
 
-
         # Parallel computation for MOPG
         processes = []
         results_queue = Queue()
         finished_event = Event()
     
         for task_id, task in enumerate(task_batch):
-            worker = Process(target=, args=) 
+            worker_args = (args, task_id, task, device, iteration, rl_num_updates, start_time, results_queue, done_event)
+            worker = Process(target=mopg_worker, args=worker_args)
             worker.start()
             processes.append(worker)
 
