@@ -1,16 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Oct 29 14:55:46 2020
-
-@author: dfotero
-"""
-
 import numpy as np
 from copy import copy, deepcopy
 from scipy.stats import poisson
 from scipy.stats import binom
-
-env=SIR_env(calibration)
 
 #----------MOPG-------------------
 # See Alg. 2 in Xu et al.
@@ -127,7 +118,7 @@ def evaluate_policy(new_policy, env, sample):#X_I,X_S,currentV_I,currentV_L):
 #OUTPUT:
 #-thePol:policy, 0 or 1
 
-def policy_gradient(env,sample,m):
+def policy_gradient(env, sample, m):
     thePol=task.pol
     X_I=sample.X_I
     X_S=sample.X_S
