@@ -16,12 +16,13 @@ else:
   from .utils import sir_environment
 
 class GenToys(object):
-  def __init__(self, sir_env):
+  def __init__(self, sir_env=None):
     '''
     Toy episode generator.
 
     Note: Config file is typically used when script is run as main. Otherwise use setup method to incorporate SIR environment from main script.
     '''
+    self.sir_env = sir_env
     self.config = None
 
   def loadConfig(self, filename):
@@ -87,16 +88,16 @@ class GenToys(object):
       for ii in self.actions:
         self.sir_env.timeStep(ii)
 
-      toy = np.array([self.sir_env.X_S_true, self.sir_env.X_I_true, self.sir_env.X_R_true])
+      toy = np.array([self.sir_env.X_S_true, self.sir_env.X_I_true, self.sir_env.X_R_true, actions])
     else:
       for ii in actions:
         self.sir_env.timeStep(ii)
 
-      toy = np.array([self.sir_env.X_S_true, self.sir_env.X_I_true, self.sir_env.X_R_true])
+      toy = np.array([self.sir_env.X_S_true, self.sir_env.X_I_true, self.sir_env.X_R_true, actions])
 
     if savefile:
       np.save("%s_deterministic.npy" % self.savefilename, toy)
-    return toy
+    return toy, actions
     
 
   def genStochasticToy(self, actions=None, n=1, savefile=False):
@@ -128,10 +129,10 @@ class GenToys(object):
 
     if savefile:
       for jj in range(n):
-        toy = np.array([X_S[jj,:], X_I[jj,:], X_R[jj,:]])
+        toy = np.array([X_S[jj,:], X_I[jj,:], X_R[jj,:], actions])
         np.save("%s_stochastic_%i.npy" % (self.savefilename, jj), toy)
 
-    return X_S, X_I, X_R
+    return X_S, X_I, X_R, actions
 
 
 
@@ -146,14 +147,17 @@ def main():
   parser.add_argument('filename', type=str, help='Directory path for configuration file.')
   args = parser.parse_args()
 
-  sir_env = sir_environment.SIR_env()
-  gt = GenToys(sir_env)
+  #sir_env = sir_environment.SIR_env()
+  #gt = GenToys(sir_env)
+  gt = GenToys()
   gt.loadConfig(args.filename)
   gt.setup()
   deterministictoy = gt.genDeterministicToy(savefile=True)
+  print("Deterministic Toy: ")
   print(deterministictoy)
   gt.setup()
   stochastictoy = gt.genStochasticToy(n=10, savefile=True)
+  print("Stochastic Toys: ")
   print(stochastictoy)
   #print(np.all((stochastictoy[0][0,:-1] - stochastictoy[0][0,1:]) >= 0))
   #print(np.all((stochastictoy[2][0,1:] - stochastictoy[2][0,:-1]) >= 0))
