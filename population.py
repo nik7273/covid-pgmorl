@@ -1,9 +1,28 @@
 import numpy as np
 from copy import deepcopy
+import torch
+import torch.optim as optim
+from class_defs import Sample
+from utils import get_ep_indices
+from scipy.optimize import least_squares
+# import torch.multiprocessing
+# torch.multiprocessing.set_sharing_strategy('file_system')
+# from torch.multiprocessing import Process, Queue, Event
 
 """
 Most of the following is taken from https://github.com/mit-gfx/PGMORL/, with minor adaptations
 """
+def collect_nearest_data(opt_graph, optgraph_id, threshold = 0.1):
+    objs_data, weights_data, delta_objs_data = [], [], []
+    for i in range(len(opt_graph.objs)):
+        diff = np.abs(opt_graph.objs[optgraph_id] - opt_graph.objs[i])
+        if np.all(diff < np.abs(opt_graph.objs[optgraph_id]) * threshold):
+            for next_index in opt_graph.succ[i]:
+                objs_data.append(opt_graph.objs[i])
+                weights_data.append(opt_graph.weights[next_index] / np.sum(opt_graph.weights[next_index]))
+                delta_objs_data.append(opt_graph.delta_objs[next_index])
+    return objs_data, weights_data, delta_objs_data
+
 def predict_hyperbolic(args, opt_graph, optgraph_id, test_weights):
     """
     Taken from https://github.com/mit-gfx/PGMORL/
@@ -172,7 +191,7 @@ class Population:
                 sparsity[i] = self.compute_sparsity(new_objs_batch)     
         return sparsity        
 
-    def prediction_model_candidates(args, opt_graph):
+    def prediction_model_candidates(self, args, opt_graph):
         """
         Receives: 
         Outputs: candidate (policy, weight) pairs to use in task selection
@@ -180,8 +199,11 @@ class Population:
         # Prediction model used for calculation of expected objectives (see eq. (5) in paper)
         num_weights = args.num_weights_candidates
         
+        #List of tasks to 
+        policy_sample_batch = [i.sample for i in self.population]
+
         candidates = []
-        for policy in self.policy_sample_batch:
+        for policy in policy_sample_batch:
             weight_center = opt_graph.weights[policy.optgraph_id]
             angle_center = np.arctan2(weight_center[1], weight_center[0])
             angle_bound = [angle_center - np.pi / 4., angle_center + np.pi / 4.]
@@ -206,30 +228,34 @@ class Population:
                         'prediction': results['predictions'][i]})
         
         return candidates
-
         
-    def prediction_guided_task_selection(args, ep, scalarization_template):
+    def prediction_guided_task_selection(self, args, ep, opt_graph, scalarization_template):
         """
         Receives: number of tasks to select `num_tasks` and pareto archive `ep` (see paper)
         Outputs: selected tasks `selected_tasks`
         """
 
-        candidate_tasks = self.prediction_model_candidates()
-        num_cands = len(candidate_tasks)
+        candidates = self.prediction_model_candidates(args, opt_graph) #need to add args
+
+        #initialize virtual ep
+        virtual_ep_objs_batch = []
+        for i in range(len(ep.sample_batch)):
+            virtual_ep_objs_batch.append(deepcopy(ep.sample_batch[i].objs))
+
+        num_cands = len(candidates)
         num_tasks = args.num_tasks
 
         # Task Selection (see Algorithm 3 in paper)
         task_mask = np.ones(num_cands, dtype=bool)
         virtual_ep_archive = deepcopy(ep)
 
-        """ TODO """
-        alpha = args.sparsity #????? what are they comparing to
+        alpha = args.sparsity 
 
         # best (task, weight) pairs and their advantage function weights
-        selected_tasks, scalarization_batch = [], []
+        selected_samples, scalarization_batch = [], []
         for _ in range(num_tasks):
-            hypervolumes = self.evaluate_hv(candidate_tasks, task_mask, virtual_ep_archive)
-            sparsities = self.evaluate_sparsity(candidate_tasks, task_mask, virtual_ep_archive)
+            hypervolumes = self.evaluate_hv(candidates, task_mask, virtual_ep_archive)
+            sparsities = self.evaluate_sparsity(candidates, task_mask, virtual_ep_archive)
 
             # select maximizing (policy, weight) pair for Q(EP, T), where
             # Q(EP, T) = H(P) + alpha*S(P), where P is population,
@@ -245,9 +271,9 @@ class Population:
                 break
 
             # add policies and weights to selected
-            selected_tasks.append(candidate_tasks[max_j]['policy'])
+            selected_samples.append(candidates[max_j]['policy'])
             scalarization = deepcopy(scalarization_template)
-            scalarization.update_weights(candidates[max_j]['weight'] / np.sum(candidates[best_id]['weight']))
+            scalarization.update_weights(candidates[max_j]['weight'] / np.sum(candidates[max_j]['weight']))
             scalarization_batch.append(scalarization)
             
             task_mask[max_j] = False
@@ -256,7 +282,7 @@ class Population:
             new_objs_batch = np.array(virtual_ep_objs_batch + predicted_new_objs)
             virtual_ep_objs_batch = new_objs_batch[get_ep_indices(new_objs_batch)].tolist()
 
-            predicted_offspring_objs.extend(predicted_new_objs)
+            predicted_new_objs.extend(predicted_new_objs)
 
-        return selected_tasks, scalarization_batch, predicted_offspring_objs
+        return selected_samples, scalarization_batch, predicted_new_objs
     

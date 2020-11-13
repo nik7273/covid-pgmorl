@@ -2,6 +2,7 @@ import numpy as np
 from utils import *
 from abc import abstractmethod
 import torch
+import copy
 
 """
 Scalarization Methods
@@ -45,10 +46,10 @@ class EP:
             self.obj_batch, self.sample_batch = \
                 map(lambda batch: batch[np.array(indices, dtype=int)], [self.obj_batch, self.sample_batch])
         else:
-            return map(lambda batch: deepcopy(batch[np.array(indices, dtype=int)]), [self.obj_batch, self.sample_batch])
+            return map(lambda batch: copy.deepcopy(batch[np.array(indices, dtype=int)]), [self.obj_batch, self.sample_batch])
 
     def update(self, sample_batch):
-        self.sample_batch = np.append(self.sample_batch, np.array(deepcopy(sample_batch)))
+        self.sample_batch = np.append(self.sample_batch, np.array(copy.deepcopy(sample_batch)))
         for sample in sample_batch:
             self.obj_batch = np.vstack([self.obj_batch, sample.objs]) if len(self.obj_batch) > 0 else np.array([sample.objs])
 
@@ -56,6 +57,7 @@ class EP:
         ep_indices = get_ep_indices(self.obj_batch)
 
         self.index(ep_indices)
+
 
 '''
 OptGraph is a data structure to store the optimization history.
@@ -70,8 +72,8 @@ class OptGraph:
         self.succ = []
 
     def insert(self, weights, objs, prev):
-        self.weights.append(deepcopy(weights) / np.linalg.norm(weights))
-        self.objs.append(deepcopy(objs))
+        self.weights.append(copy.deepcopy(weights) / np.linalg.norm(weights))
+        self.objs.append(copy.deepcopy(objs))
         self.prev.append(prev)
         if prev == -1:
             self.delta_objs.append(np.zeros_like(objs))
@@ -89,24 +91,24 @@ Define a MOPG task, which is a pair of a policy and a scalarization weight.
 class Task:
     def __init__(self, sample, scalarization):
         self.sample = Sample.copy_from(sample)
-        self.scalarization = deepcopy(scalarization)
+        self.scalarization = copy.deepcopy(scalarization)
         
 '''
 Sample is a policy with associated environment variables.
 '''
 class Sample:
-    def __init__(self, objs = None, optgraph_id = None):
+    def __init__(self, X_I, X_S, objs = None, optgraph_id = None):
         self.objs = objs
-        self.X_I = 0
-        self.X_S = 0 
-        self.val_I = []
-        self.val_L = []
+        self.X_I = X_I
+        self.X_S = X_S 
+        self.val_I = objs[0] if objs else []
+        self.val_L = objs[1] if objs else []
         self.policy = -1
         
         self.optgraph_id = optgraph_id
 
     @classmethod
     def copy_from(cls, sample):
-        objs = deepcopy(sample.objs)
+        objs = copy.deepcopy(sample.objs)
         optgraph_id = sample.optgraph_id
-        return cls(agent, objs, optgraph_id)
+        return cls(objs, optgraph_id)

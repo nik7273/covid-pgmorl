@@ -16,8 +16,7 @@ import torch.optim as optim
 import time
 # from multiprocessing import Process, Queue, Event
 
-# TODO: fix this
-def initialize_warmup_batch(args, device):
+def initialize_warmup_batch(args, model_cal, device):
     """
     Training policies during warmup stage
     """
@@ -27,14 +26,13 @@ def initialize_warmup_batch(args, device):
     sample_batch = []
     scalarization_batch = []
 
-    model_cal = model_calibration()
     temp_env = SIR_env(model_cal) # temp_env is only used for initialization
 
     for weights in weights_batch:
         
         scalarization = WeightedSumScalarization(num_objs = args.obj_num, weights = weights)
 
-        sample = Sample(optgraph_id = -1)
+        sample = Sample(model_cal.X_I, model_cal.X_S, optgraph_id = -1)
         objs = evaluate_policy(args, temp_env, sample)
         sample.objs = objs
 
@@ -47,7 +45,7 @@ def initialize_warmup_batch(args, device):
 def run(args):
     print("In run")
     """
-    Runs the entire MORL algorithm. (See Alg. 1 in paper)
+    Runs the entire MORL algorithm. (See Alg. 1 in Xu et al.)
     """
     # Torch stuff
     np.random.seed(args.seed)
@@ -55,6 +53,13 @@ def run(args):
     torch.set_default_dtype(torch.float64)
     torch.set_num_threads(1)
     device = torch.device("cpu")
+
+    # Load lockdown dataset
+    data_arr = torch.load(args.dataset)
+    O_I = np.cumsum(data_arr[:,0])
+    AC = data_arr[:,3] # Action time series
+    model_cal = model_calibration(O_I, ac)
+    #beta, gamma = cal_model.model_mls()
 
     # Initialization
     scalarization_template = WeightedSumScalarization(num_objs = args.obj_num, weights = np.ones(args.obj_num) / args.obj_num)
@@ -65,7 +70,7 @@ def run(args):
     population = Population()
     opt_graph = OptGraph()
     
-    selected_tasks, scalarization_batch = initialize_warmup_batch(args, device)
+    selected_tasks, scalarization_batch = initialize_warmup_batch(args, model_cal, device)
     rl_num_updates = args.warmup_iter
     for sample, scalarization in zip(selected_tasks, scalarization_batch):
         sample.optgraph_id = opt_graph.insert(deepcopy(scalarization.weights), deepcopy(sample.objs), -1)
@@ -98,33 +103,21 @@ def run(args):
     
         all_offspring_batch = []
         for task_id, task in enumerate(task_batch):
-            env = SIR_env()
+            env = SIR_env(model_cal)
             offspring_population = mopg(env, task_batch, rl_num_updates)
             all_offspring_batch.append(offspring_population)
             #worker_args = (args, task_id, task, device, iteration, rl_num_updates, start_time, results_queue, done_event)            
             #worker = Process(target=mopg_worker, args=worker_args)
             #worker.start()
             #processes.append(worker)
-
-        # collect MOPG results for offsprings and insert objs into objs buffer
-        # all_offspring_batch = [[] for _ in range(len(processes))]
-        # cnt_done_workers = 0
-        # 
-        # rl_results = results_queue.get()
-        # task_id, offsprings = rl_results['task_id'], rl_results['offspring_batch']
-        # for sample in offsprings:
-        #     all_offspring_batch[task_id].append(Sample.copy_from(sample))
-        # if rl_results['done']:
-        #     cnt_done_workers += 1
         
         # put all intermediate policies into all_sample_batch for EP update
         all_sample_batch = [] 
-        # store the last policy for each optimization weight for RA
         # last_offspring_batch = [None] * len(processes) 
         # only the policies with iteration % update_iter = 0 are inserted into offspring_batch for population update
         # after warm-up stage, it's equivalent to the last_offspring_batch
         offspring_batch = [] 
-        for task_id in range(len(processes)):
+        for task_id in range(len(task_batch)):
             offsprings = all_offspring_batch[task_id]
             prev_node_id = task_batch[task_id].sample.optgraph_id
             opt_weights = deepcopy(task_batch[task_id].scalarization.weights).detach().numpy()
@@ -136,83 +129,27 @@ def run(args):
                     offspring_batch.append(sample)
             last_offspring_batch[task_id] = offsprings[-1]
 
-        finished_event.set()
+        # finished_event.set()
 
         # ----------------------> Update EP <------------------------ #
         ep.update(all_sample_batch)
         population.update(offspring_batch)
 
-        # ------------------- > Task Selection <--------------------- #
+        # -------------------> Task Selection for Next Stage/Evaluation <--------------------- #
 
-        selected_tasks, scalarization_batch, predicted_offspring_objs = \
-            population.prediction_guided_selection(args, iteration, ep, opt_graph, scalarization_template)
+        selected_samples, scalarization_batch, predicted_offspring_objs = \
+            population.prediction_guided_selection(args, ep, opt_graph, scalarization_template)
 
         print_info('Selected Tasks:')
-        for i in range(len(selected_tasks)):
-            print_info('objs = {}, weight = {}'.format(selected_tasks[i].objs, scalarization_batch[i].weights))
+        for i in range(len(selected_samples)):
+            print_info('objs = {}, weight = {}'.format(selected_samples[i].objs, scalarization_batch[i].weights))
 
         iteration = min(iteration + rl_num_updates, total_num_updates)
 
         rl_num_updates = args.update_iter
 
-        # ----------------------> Save Results <---------------------- #
-        # save ep
-    #     ep_dir = os.path.join(args.save_dir, str(iteration), 'ep')
-    #     os.makedirs(ep_dir, exist_ok = True)
-    #     with open(os.path.join(ep_dir, 'objs.txt'), 'w') as fp:
-    #         for obj in ep.obj_batch:
-    #             fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*obj))
-
-    #     # save population
-    #     population_dir = os.path.join(args.save_dir, str(iteration), 'population')
-    #     os.makedirs(population_dir, exist_ok = True)
-    #     with open(os.path.join(population_dir, 'objs.txt'), 'w') as fp:
-    #         for sample in population.sample_batch:
-    #             fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(sample.objs)))
-    #     # save optgraph and node id for each sample in population
-    #     with open(os.path.join(population_dir, 'optgraph.txt'), 'w') as fp:
-    #         fp.write('{}\n'.format(len(opt_graph.objs)))
-    #         for i in range(len(opt_graph.objs)):
-    #             fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + ';{:5f}' + (args.obj_num - 1) * ',{:5f}' + ';{}\n')\
-    #                      .format(*(opt_graph.weights[i]), *(opt_graph.objs[i]), opt_graph.prev[i]))
-    #         fp.write('{}\n'.format(len(population.sample_batch)))
-    #         for sample in population.sample_batch:
-    #             fp.write('{}\n'.format(sample.optgraph_id))
-
-    #     # save selected tasks
-    #     elite_dir = os.path.join(args.save_dir, str(iteration), 'elites')
-    #     os.makedirs(elite_dir, exist_ok = True)
-    #     with open(os.path.join(elite_dir, 'elites.txt'), 'w') as fp:
-    #         for elite in selected_tasks:
-    #             fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(elite.objs)))
-    #     with open(os.path.join(elite_dir, 'weights.txt'), 'w') as fp:
-    #         for scalarization in scalarization_batch:
-    #             fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(scalarization.weights)))
-    #     if args.selection_method == 'prediction-guided':
-    #         with open(os.path.join(elite_dir, 'predictions.txt'), 'w') as fp:
-    #             for objs in predicted_offspring_objs:
-    #                 fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(objs)))
-    #     with open(os.path.join(elite_dir, 'offsprings.txt'), 'w') as fp:
-    #         for i in range(len(all_offspring_batch)):
-    #             for j in range(len(all_offspring_batch[i])):
-    #                 fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(all_offspring_batch[i][j].objs)))
-
-    # # ----------------------> Save Final Model <---------------------- 
-
-    # os.makedirs(os.path.join(args.save_dir, 'final'), exist_ok = True)
-
-    # # save ep policies
-    # for i, sample in enumerate(ep.sample_batch):
-    #     torch.save(sample.actor_critic.state_dict(), os.path.join(args.save_dir, 'final', 'EP_policy_{}.pt'.format(i)))
-    
-    # # save all ep objectives
-    # with open(os.path.join(args.save_dir, 'final', 'objs.txt'), 'w') as fp:
-    #     for i, obj in enumerate(ep.obj_batch):
-    #         fp.write(('{:5f}' + (args.obj_num - 1) * ',{:5f}' + '\n').format(*(obj)))
-
-    # # save all ep env_params
-    # if args.obj_rms:
-    #     with open(os.path.join(args.save_dir, 'final', 'env_params.txt'), 'w') as fp:
-    #         for sample in ep.sample_batch:
-    #             fp.write('obj_rms: mean: {} var: {}\n'.format(sample.env_params['obj_rms'].mean, sample.env_params['obj_rms'].var))
+    print('begin evaluation')
+    # Evaluate final policies, create pareto front
+    # TODO: Add functions for these
+    print("DONE!")
 
