@@ -121,32 +121,37 @@ def policy_gradient(env, task, m):
     
     X_I = task.sample.X_I
     X_S = task.sample.X_S
-    val_I = task.sample.val_I[X_I,X_S]
-    val_L = task.sample.val_L[X_I,X_S]
+    val_obj_I = task.sample.val_I[X_I,X_S] #minimizing infections
+    val_obj_L = task.sample.val_L[X_I,X_S] #minimizing lockdowns
     current_policy = -1
-    for _ in range(1,m):
-        #1 stands for lockdown, 0 no lockdown   
-        env_1 = deepcopy(env)     
-        temp_sample_L = Sample(X_I, X_S, [val_I, val_L])
-        objs_L = evaluate_policy(1, env_1, temp_sample_L)
-        valL = task.scalarization.evaluate(objs_L)
 
-        env_0 = deepcopy(env)
-        temp_sample_N = Sample(X_I, X_S, [val_I, val_L])
-        objs_N = evaluate_policy(0, env_0, temp_sample_N)
-        valN = task.scalarization.evaluate(objs_N)
-        
-        valL_I, valL_L = objs_L[0], objs_L[1]
-        valN_I, valN_L = objs_N[0], objs_N[1]
-        if valL <= valN:
-            current_policy=1
-            env = env_1
-            val_I = valL_I
-            val_L = valL_L
-        else:
-            current_policy=0
-            env = env_0
-            val_I = valN_I
-            val_L = valN_L
+    sim_valN=0
+    sim_valL=0
     
+    env_1 = deepcopy(env)     
+    env_0 = deepcopy(env)
+
+    X_I_N = X_I
+    X_I_L = X_I
+
+    X_S_N = X_S
+    X_S_L = X_S
+    
+    for _ in range(1,m):
+        #1 stands for lockdown, 0 no lockdown
+        temp_sample_L = Sample(X_I_L, X_S_L, [val_obj_I, val_obj_L])
+        objs_L = evaluate_policy(1, env_1, temp_sample_L)
+        sim_valL += task.scalarization.evaluate(objs_L)
+        X_I_L, X_S_L = env_1.X_I, env_1.X_S
+
+        temp_sample_N = Sample(X_I_N, X_S_N, [val_obj_I, val_obj_L])
+        objs_N = evaluate_policy(0, env_0, temp_sample_N)
+        sim_valN += task.scalarization.evaluate(objs_N)
+        X_I_N, X_S_N = env_0.X_I, env_0.X_S
+        
+    if sim_valL <= sim_valN:
+        current_policy=1
+    else:
+        current_policy=0
+       
     return current_policy
