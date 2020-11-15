@@ -1,45 +1,43 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Oct 29 14:55:46 2020
-
-@author: dfotero
-"""
-
 import numpy as np
+from copy import copy, deepcopy
 from scipy.stats import poisson
 from scipy.stats import binom
-
-env=SIR_env(calibration)
-
+from class_defs import Sample
 
 #----------MOPG-------------------
+# See Alg. 2 in Xu et al.
 #INPUT:
 #-env: enviroment
-#-tasks:group of tasks where each task has:
+#-tasks:group of Tasks where each task's sample has:
 #       - X_I: current infected
 #       - X_S: current Susceptible
-#       - pol: Current policy (1: lockdown, 0:no lockdown)  
-#       - w_I: Current weight for the objective to minimize infected 
-#       - w_L: Current weight value for the objective to minimize lockdowns
 #       - val_I: Current optimal value for the objective to minimize infected 
 #       - val_L: Current optimal value for the objective to minimize lockdowns
+#       - policy: Current policy (1: lockdown, 0:no lockdown)  
+# and each Task additionally includes a scalarization_batch with:
+#       - w_I: Current weight for the objective to minimize infected 
+#       - w_L: Current weight value for the objective to minimize lockdowns
+
 #-m: number of iterations for mopg
 #OUTPUT:
-#-update tasks (policy)
-#-update F(values)
-def mopg(env,tasks,m):
-    newTasks=tasks
+#-offspring population P'
+def mopg(env, tasks, m):
+    offspring = []
     for i in range(len(tasks)):
-        theTask=newTasks[i]
-        newPol = polGrad(env,theTask,m)
-        theTask.val_I[theTask.X_I,theTask.X_S],theTask.val_L[theTask.X_I,theTask.X_S]= evalPol(newPol,env,theTask.X_I,theTask.X_S,theTask.val_I[theTask.X_I,theTask.X_S],theTask.val_L[theTask.X_I,theTask.X_S])
-        theTask.pol[theTask.X_I,theTask.X_S]=newPol
-        newTasks[i]=theTask
-    return tasks
+        curr_task = copy(tasks[i])
+        new_policy = policy_gradient(env, curr_task, m)
+        objs = evaluate_policy(
+            new_policy,
+            env,
+            curr_task.sample
+        )
+        curr_task.sample.val_I[curr_task.sample.X_I,curr_task.sample.X_S] = objs[0]
+        curr_task.sample.val_L[curr_task.sample.X_I,curr_task.sample.X_S] = objs[1]
+        curr_task.pol[curr_task.sample.X_I,curr_task.sample.X_S] = new_policy
+        offspring.append(curr_task.sample)
+    return offspring
 
-
-
-#----------evalPol-------------------
+#----------evaluate_policy-------------------
 # Evaluate a policy and returns the values
 #INPUT:
 #-newPol:policy to evaluate
@@ -51,19 +49,24 @@ def mopg(env,tasks,m):
 #OUTPUT:
 #-val_I:New value for the objective to minimize infecte
 #-val_L:New value for the objective to minimize lockdowns 
-def evalPol(newPol,env,X_I,X_S,currentV_I,currentV_L):
-    env.time_step(newPol)
+def evaluate_policy(new_policy, env, sample):
+    env.time_step(new_policy)
+    
+    X_I, X_S = sample.X_I, sample.X_S
+    currentV_I = sample.val_I
+    currentV_L = sample.val_L
+    
     meanX_S, meanX_I, meanX_R = env.sample_stochastic()
     errX_S, errX_I, errX_R = env.get_error()
     
     val_I=meanX_I
-    val_L=newPol
+    val_L=new_policy
     
     lowXS=max(round(meanX_S-errX_S,0),0)
     uppXS=min(round(meanX_S+errX_S,0),env.M)
     
-    lowXI=max(round(meanX_I-errX_I,0),0)
-    uppXI=min(round(meanX_I+errX_I,0),env.M)
+    # lowXI=max(round(meanX_I-errX_I,0),0)
+    # uppXI=min(round(meanX_I+errX_I,0),env.M)
     
     lowXR=max(round(meanX_R-errX_R,0),0)
     uppXR=min(round(meanX_R+errX_R,0),env.M)
@@ -93,10 +96,11 @@ def evalPol(newPol,env,X_I,X_S,currentV_I,currentV_L):
             
             val_I+=0.97*probI*probR*currentV_I[X_I+i-j-1,X_S-i-1]
             val_L+=0.97*probI*probR*currentV_L[X_I+i-j-1,X_S-i-1]
-    
-    return val_I,val_L
 
-#----------polGrad-------------------
+    objs = [val_I, val_L]
+    return objs
+
+#----------policy_gradient-------------------
 # Returns new policy
 #INPUT:
 #-env: enviroment
@@ -111,32 +115,43 @@ def evalPol(newPol,env,X_I,X_S,currentV_I,currentV_L):
 #       - val_L: Current optimal value for the objective to minimize lockdowns
 #-m: number of iterations for mopg
 #OUTPUT:
-#-thePol:policy
+#-thePol:policy, 0 or 1
 
-def polGrad(env,task,m):
-    thePol=task.pol
-    X_I=task.X_I
-    X_S=task.X_S
+def policy_gradient(env, task, m):
     
-    val_I=task.val_I[X_I,X_S]
-    val_L=task.val_L[X_I,X_S]
+    X_I = task.sample.X_I
+    X_S = task.sample.X_S
+    val_obj_I = task.sample.val_I[X_I,X_S] #minimizing infections
+    val_obj_L = task.sample.val_L[X_I,X_S] #minimizing lockdowns
+    current_policy = -1
+
+    sim_valN=0
+    sim_valL=0
     
-    for i in range(1,m):
+    env_1 = deepcopy(env)     
+    env_0 = deepcopy(env)
+
+    X_I_N = X_I
+    X_I_L = X_I
+
+    X_S_N = X_S
+    X_S_L = X_S
+    
+    for _ in range(1,m):
         #1 stands for lockdown, 0 no lockdown
-        valL_I,valL_L=evalPol(1,env,X_I,X_S,val_I,val_L)
-        valL=task.w_I*valL_I+task.w_L*valL_L
+        temp_sample_L = Sample(X_I_L, X_S_L, [val_obj_I, val_obj_L])
+        objs_L = evaluate_policy(1, env_1, temp_sample_L)
+        sim_valL += task.scalarization.evaluate(objs_L)
+        X_I_L, X_S_L = env_1.X_I, env_1.X_S
+
+        temp_sample_N = Sample(X_I_N, X_S_N, [val_obj_I, val_obj_L])
+        objs_N = evaluate_policy(0, env_0, temp_sample_N)
+        sim_valN += task.scalarization.evaluate(objs_N)
+        X_I_N, X_S_N = env_0.X_I, env_0.X_S
         
-        valN_I,valN_L=evalPol(0,env,X_I,X_S,val_I,val_L)
-        
-        valN=task.w_I*valN_I+task.w_L*valN_L
-        
-        if valL<=valN:
-            thePol=1
-            val_I=valL_I
-            val_L=valL_L
-        else:
-            thePol=0
-            val_I=valN_I
-            val_L=valN_L
-    
-    return thePol
+    if sim_valL <= sim_valN:
+        current_policy=1
+    else:
+        current_policy=0
+       
+    return current_policy

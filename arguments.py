@@ -81,85 +81,10 @@ def get_parser():
         '--save-dir',
         default='./trained_models/',
         help='directory to save agent logs (default: ./trained_models/)')
-
-    # PPO parameters
     parser.add_argument(
-        '--algo', default='ppo')
-    parser.add_argument(
-        '--lr', type=float, default=3e-4, help='learning rate (default: 3e-4)')
-    parser.add_argument(
-        '--use-linear-lr-decay',
-        action='store_true',
-        default=False,
-        help='use a linear schedule on the learning rate')
-    parser.add_argument('--lr-decay-ratio',
-        type=float,
-        default=1.0,
-        help='ratio of lr decay from beginning to the end (e.g., 1.0 means lr finally decays to 0, 0.0 means lr stays constant)')
-    parser.add_argument(
-        '--gamma',
-        type=float,
-        default=0.995,
-        help='discount factor for rewards (default: 0.995)')
-    parser.add_argument(
-        '--use-gae',
-        action='store_true',
-        default=False,
-        help='use generalized advantage estimation')
-    parser.add_argument(
-        '--gae-lambda',
-        type=float,
-        default=0.95,
-        help='gae lambda parameter (default: 0.95)')
-    parser.add_argument(
-        '--entropy-coef',
-        type=float,
-        default=0.0,
-        help='entropy term coefficient (default: 0.01)')
-    parser.add_argument(
-        '--value-loss-coef',
-        type=float,
-        default=0.5,
-        help='value loss coefficient (default: 0.5)')
-    parser.add_argument(
-        '--max-grad-norm',
-        type=float,
-        default=0.5,
-        help='max norm of gradients (default: 0.5)')
-    parser.add_argument(
-        '--num-steps',
-        type=int,
-        default=2048,
-        help='timesteps per epoch.')
-    parser.add_argument(
-        '--num-processes',
-        type=int,
-        default=4,
-        help='how many training CPU processes to use (default: 4)')
-    parser.add_argument(
-        '--ppo-epoch',
-        type=int,
-        default=10,
-        help='number of ppo epochs (default: 10)')
-    parser.add_argument(
-        '--num-mini-batch',
-        type=int,
-        default=32,
-        help='number of batches for ppo (default: 32)')
-    parser.add_argument(
-        '--clip-param',
-        type=float,
-        default=0.2,
-        help='ppo clip parameter (default: 0.2)') 
-    parser.add_argument(
-        '--use-proper-time-limits',
-        action='store_true',
-        default=False,
-        help='compute returns taking into account time limits')
-    parser.add_argument(
-        '--layernorm', 
-        action='store_true',
-        default=False,
-        help='if use layernorm')
+        '--dataset',
+        default=None,
+        help='.pt file with lockdown data'
+    )
 
     return parser
