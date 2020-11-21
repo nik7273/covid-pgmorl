@@ -46,7 +46,7 @@ class PolicyTemplate(torch.nn.Module):
     return x
 
 class DDQN(object):
-  def __init__(self,  nstate=2, naction=1, nlayernode=16):
+  def __init__(self,  nstate=2, naction=2, nlayernode=16):
     self.nstate = nstate
     self.naction = naction
     self.nlayernode = nlayernode
