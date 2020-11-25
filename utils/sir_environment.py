@@ -56,6 +56,16 @@ class SIR_env(object):
       self.M = None
       print("Use setup method to define model parameters.")
 
+  def reset(self):
+    self.X_S_true = np.array([self.X_S_true[0]])
+    self.X_I_true = np.array([self.X_I_true[0]])
+    self.X_R_true = np.array([self.X_R_true[0]])
+
+    state = [self.X_S_true[0], self.X_S_true[0], self.X_S_true[0]]
+    done = False
+
+    return state, done
+
   def setup(self, X_S0=None, X_I0=None, X_R0=None, beta=None, gamma=None, M=None):
     if X_S0 is not None:
       self.X_S_true = np.array([X_S0]).astype(int)

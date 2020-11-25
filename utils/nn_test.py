@@ -27,11 +27,17 @@ sir_env.setup(f_S0*M, f_I0*M, f_R0*M, beta, gamma, M)
 sir_nn = DDQN()
 
 for ii in range(nsteps):
-  action = sir_nn.select_action([f_R0, f_I0])
-  (X_S0, X_I0, X_R0), reward = sir_env.timeStep(action)
+  state, done = sir_env.reset()
+  episodic_reward = np.zeros(2)
 
-  f_R0 = X_R0 / M
-  f_I0 = X_I0 / M
+  while not done:
+    action = sir_nn.select_action(state)
+    (X_S, X_I, X_R), reward, done, info = sir_env.timeStep(action)
+    next_state = [X_S/M, X_I/M, X_R/M]
+    episodic_reward += reward
+    sign = 1 if done else 0
+    sir_nn.train(state, action, reward, next_state, sign)
+    state = next_state
 
   if ((ii % 10) == 0):
     print("%i of %i steps." % (ii+1, nsteps))
