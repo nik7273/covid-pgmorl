@@ -134,8 +134,14 @@ class SIR_env(object):
 
     next_state = self.getDeterministic()
     reward = self.getReward()
+    done = 0
+    if (len(self.rewards) >= 7):
+      done = -1
+    elif (self.X_S < self.M/2):
+      done = 1
+    info = {"obj": reward}
 
-    return next_state, reward
+    return next_state, reward, done, info
 
   def getReward(self):
     # societal cost: 
