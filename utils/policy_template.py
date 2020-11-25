@@ -103,7 +103,7 @@ class DDQN(object):
       action = torch.argmax(self.target_NN.forward(torch.from_numpy(states).float())).numpy()
     return action
 
-  def train(self,s0,a0,r,s1,sign):
+  def train(self,s0,a0,r,s1,sign,wts=[1.0, 0]):
     self.buffer_s0[self.index % self.replay_buffer,:] = s0
     self.buffer_a0[self.index % self.replay_buffer] = a0
     self.buffer_r[self.index % self.replay_buffer] = r
@@ -125,7 +125,7 @@ class DDQN(object):
         Q1 = self.target_NN(torch.from_numpy(self.buffer_s1[batch_indices]).float())
         a1 = self.policy(self.buffer_s0[batch_indices], batch=True)
         Q1 = Q1.gather(1, torch.from_numpy(a1).view(-1,1)).view(-1)
-        loss = self.loss_fn(Q0, torch.from_numpy(self.buffer_r[batch_indices]) + self.alpha*Q1*torch.from_numpy(self.buffer_done[batch_indices]==0))
+        loss = self.loss_fn(Q0, torch.from_numpy(self.buffer_r[batch_indices]*wts) + self.alpha*Q1*torch.from_numpy(self.buffer_done[batch_indices]==0))
         loss.backward()
         self.opt.step()
       else:

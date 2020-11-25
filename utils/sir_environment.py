@@ -31,6 +31,7 @@ class SIR_env(object):
       self.std_X_S = np.zeros(1)
       self.std_X_I = np.zeros(1)
       self.std_X_R = np.zeros(1)
+      self.actions = np.array([])
 
       self.beta = self.model_calibration.beta
       self.gamma = self.model_calibration.gamma
@@ -112,6 +113,9 @@ class SIR_env(object):
     self.X_I_true = np.append(self.X_I_true, X_I_new)
     self.X_R_true = np.append(self.X_R_true, X_R_new)
 
+    # update actions list
+    self.actions = np.append(self.actions, action)
+
     # ensure X_S is monotonically decreasing or equal
     temp_X_S = int(np.random.normal(self.X_S_true[-1],self.std_X_S[-1]))
     while (temp_X_S > self.X_S[-1]):
@@ -127,6 +131,23 @@ class SIR_env(object):
     self.std_X_S = np.append(self.std_X_S, np.sqrt(self.std_X_S[-1]**2 + std_X_S_new**2))
     self.std_X_I = np.append(self.std_X_I, np.sqrt(self.std_X_I[-1]**2 + std_X_I_new**2))
     self.std_X_R = np.append(self.std_X_R, np.sqrt(self.std_X_R[-1]**2 + std_X_R_new**2))
+
+    next_state = self.getDeterministic()
+    reward = self.getReward()
+
+    return next_state, reward
+
+  def getReward(self):
+    # societal cost: 
+    # TODO: calculated based on true values; maybe consider something with the stochastic data later
+    cost_s = self.X_I_true[-1] / (self.X_S_true[-1] + self.X_I_true[-1])
+
+    # economic cost: 
+    r_ld = 1.0  # TODO: incorporate a more robust lockdown cost rate
+    cost_e = self.actions[-1] * r_ld
+
+    cost = [cost_s, cost_e]
+    return cost
 
   def getDeterministic(self):
     '''

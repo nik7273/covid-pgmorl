@@ -28,11 +28,7 @@ sir_nn = DDQN()
 
 for ii in range(nsteps):
   action = sir_nn.select_action([f_R0, f_I0])
-  sir_env.timeStep(action)
-  X_S0, X_I0, X_R0 = sir_env.getDeterministic()
-
-  # TODO: calculate reward
-
+  (X_S0, X_I0, X_R0), reward = sir_env.timeStep(action)
 
   f_R0 = X_R0 / M
   f_I0 = X_I0 / M
