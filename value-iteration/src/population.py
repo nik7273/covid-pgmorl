@@ -1,3 +1,7 @@
+"""
+Most of the following is taken from https://github.com/mit-gfx/PGMORL/, with minor adaptations
+"""
+
 import numpy as np
 from copy import deepcopy
 import torch
@@ -5,18 +9,12 @@ import torch.optim as optim
 from class_defs import Sample
 from utils import get_ep_indices
 from scipy.optimize import least_squares
-# import torch.multiprocessing
-# torch.multiprocessing.set_sharing_strategy('file_system')
-# from torch.multiprocessing import Process, Queue, Event
 
-"""
-Most of the following is taken from https://github.com/mit-gfx/PGMORL/, with minor adaptations
-"""
 def collect_nearest_data(opt_graph, optgraph_id, threshold = 0.1):
     objs_data, weights_data, delta_objs_data = [], [], []
     for i in range(len(opt_graph.objs)):
         diff = np.abs(opt_graph.objs[optgraph_id] - opt_graph.objs[i])
-        if np.all(diff < np.abs(opt_graph.objs[optgraph_id]) * threshold):
+        if np.all(diff/threshold <= np.abs(opt_graph.objs[optgraph_id])):
             for next_index in opt_graph.succ[i]:
                 objs_data.append(opt_graph.objs[i])
                 weights_data.append(opt_graph.weights[next_index] / np.sum(opt_graph.weights[next_index]))
@@ -44,7 +42,7 @@ def predict_hyperbolic(args, opt_graph, optgraph_id, test_weights):
         cnt_data = 0
         for i in range(len(weights_data)):
             flag = True
-            for j in range(i):
+            for j in range(i): 
                 if np.linalg.norm(weights_data[i] - weights_data[j]) < 1e-5:
                     flag = False
                     break
@@ -57,7 +55,6 @@ def predict_hyperbolic(args, opt_graph, optgraph_id, test_weights):
         else:
             threshold *= 2.0
             sigma *= 2.0
-
     def f(x, A, a, b, c):
         return A * (np.exp(a * (x - b)) - 1) / (np.exp(a * (x - b)) + 1) + c
 
@@ -94,7 +91,7 @@ def predict_hyperbolic(args, opt_graph, optgraph_id, test_weights):
             train_x.append(weights_data[i][dim])
             train_y.append(delta_objs_data[i][dim])
             diff = np.abs(objs_data[i] - opt_graph.objs[optgraph_id])
-            dist = np.linalg.norm(diff / np.abs(opt_graph.objs[optgraph_id]))
+            dist = np.linalg.norm(diff / (np.abs(opt_graph.objs[optgraph_id])+1e-6))
             coef = np.exp(-((dist  / sigma) ** 2) / 2.0)
             w.append(coef)
         
@@ -117,7 +114,6 @@ def predict_hyperbolic(args, opt_graph, optgraph_id, test_weights):
             jac = jac,
             bounds = ([0, 0.1, -5., -500.], [A_upperbound, 20., 5., 500.])
         )
-        
         delta_predictions.append(f(test_weights.T[dim], *res_robust.x))
 
     predictions = []
@@ -174,6 +170,9 @@ class Population:
         hv = [0.0 for _ in range(len(candidates))]
         for i in range(len(candidates)):
             if mask[i]:
+                #print('-----------------here----------------')
+                #print(virtual_ep_objs_batch)
+                #print([candidates[i]['prediction']])
                 new_objs_batch = np.array(virtual_ep_objs_batch + [candidates[i]['prediction']])
                 hv[i] = self.compute_hypervolume(new_objs_batch)
         return hv
@@ -197,12 +196,13 @@ class Population:
         Outputs: candidate (policy, weight) pairs to use in task selection
         """
         # Prediction model used for calculation of expected objectives (see eq. (5) in paper)
-        num_weights = args.num_weights_candidates
+        num_weights = args.num_weight_candidates
         
         #List of tasks to 
-        policy_sample_batch = [i.sample for i in self.population]
+        policy_sample_batch = [i for i in self.population]
 
         candidates = []
+        print("policy_sample_batch",len(policy_sample_batch))
         for policy in policy_sample_batch:
             weight_center = opt_graph.weights[policy.optgraph_id]
             angle_center = np.arctan2(weight_center[1], weight_center[0])
@@ -223,6 +223,7 @@ class Population:
                         test_weights.append(weight)
             if len(test_weights) > 0:
                 results = predict_hyperbolic(args, opt_graph, policy.optgraph_id, test_weights)
+                
                 for i in range(len(test_weights)):
                     candidates.append({'policy': policy, 'weight': test_weights[i], \
                         'prediction': results['predictions'][i]})
@@ -236,7 +237,6 @@ class Population:
         """
 
         candidates = self.prediction_model_candidates(args, opt_graph) #need to add args
-
         #initialize virtual ep
         virtual_ep_objs_batch = []
         for i in range(len(ep.sample_batch)):
@@ -253,10 +253,10 @@ class Population:
 
         # best (task, weight) pairs and their advantage function weights
         selected_samples, scalarization_batch = [], []
+        predicted_new_objs = []
         for _ in range(num_tasks):
-            hypervolumes = self.evaluate_hv(candidates, task_mask, virtual_ep_archive)
-            sparsities = self.evaluate_sparsity(candidates, task_mask, virtual_ep_archive)
-
+            hypervolumes = self.evaluate_hv(candidates, task_mask, virtual_ep_objs_batch)
+            sparsities = self.evaluate_sparsity(candidates, task_mask, virtual_ep_objs_batch)
             # select maximizing (policy, weight) pair for Q(EP, T), where
             # Q(EP, T) = H(P) + alpha*S(P), where P is population,
             # H is hypervolume, and S is sparsity. See eq. 5 in paper.
@@ -283,6 +283,6 @@ class Population:
             virtual_ep_objs_batch = new_objs_batch[get_ep_indices(new_objs_batch)].tolist()
 
             predicted_new_objs.extend(predicted_new_objs)
-
+       
         return selected_samples, scalarization_batch, predicted_new_objs
-    
+

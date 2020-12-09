@@ -3,18 +3,19 @@ base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.append(base_dir)
 
 from copy import deepcopy
-from class_defs import EP, Sample, WeightedSumScalarization, OptGraph
-from mopg import evaluate_policy, mopg
+from class_defs import EP, Sample, WeightedSumScalarization, OptGraph, Task
+from mopo import evaluate_policy, mopo
 from population import Population
-from utils import update_ep, generate_weights_batch_dfs
+from utils import update_ep, generate_weights_batch_dfs, print_info
 from sir_model_env import model_calibration, SIR_env
+from output import *
+from plots import *
 
 import numpy as np
 import torch
 import torch.optim as optim
 
 import time
-# from multiprocessing import Process, Queue, Event
 
 def initialize_warmup_batch(args, model_cal, device):
     """
@@ -31,10 +32,10 @@ def initialize_warmup_batch(args, model_cal, device):
     for weights in weights_batch:
         
         scalarization = WeightedSumScalarization(num_objs = args.obj_num, weights = weights)
-
-        sample = Sample(model_cal.X_I, model_cal.X_S, optgraph_id = -1)
-        objs = evaluate_policy(args, temp_env, sample)
+        sample = Sample(model_cal.X_I[-1], model_cal.X_S[-1], -1, optgraph_id = -1)
+        objs = evaluate_policy(sample.policy, temp_env, sample, 0)
         sample.objs = objs
+        print("XI", sample.X_I)
 
         sample_batch.append(sample)
         scalarization_batch.append(scalarization)
@@ -57,13 +58,14 @@ def run(args):
     # Load lockdown dataset
     data_arr = torch.load(args.dataset)
     O_I = np.cumsum(data_arr[:,0])
+    print("O_I",O_I)
     AC = data_arr[:,3] # Action time series
-    model_cal = model_calibration(O_I, ac)
-    #beta, gamma = cal_model.model_mls()
+    model_cal = model_calibration(O_I, AC)
+    model_cal.model_mls()
 
     # Initialization
     scalarization_template = WeightedSumScalarization(num_objs = args.obj_num, weights = np.ones(args.obj_num) / args.obj_num)
-    total_num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
+    total_num_updates = args.total_num_updates
     # start_time = time.time()
     
     external_pareto = EP()
@@ -78,6 +80,7 @@ def run(args):
     episode = 0
     iteration = 0
     print("Done initializing")
+    total_batch=[]
     while iteration < total_num_updates:
         print(f"In iteration {iteration}")
         if episode == 0:
@@ -92,30 +95,25 @@ def run(args):
         # --------------------> RL Optimization <-------------------- #
         # compose task for each elite
         task_batch = []
+        
         for selected, scalarization in \
                 zip(selected_tasks, scalarization_batch):
             task_batch.append(Task(selected, scalarization)) # each task is a (policy, weight)
+            task_batch[-1].sample.index_task=len(task_batch)-1
 
-        # Parallel computation for MOPG
-        # processes = []
-        # results_queue = Queue()
-        # finished_event = Event()
-    
         all_offspring_batch = []
+        
         for task_id, task in enumerate(task_batch):
             env = SIR_env(model_cal)
-            offspring_population = mopg(env, task_batch, rl_num_updates)
-            all_offspring_batch.append(offspring_population)
-            #worker_args = (args, task_id, task, device, iteration, rl_num_updates, start_time, results_queue, done_event)            
-            #worker = Process(target=mopg_worker, args=worker_args)
-            #worker.start()
-            #processes.append(worker)
+            offsprings_task = mopo(env, task, rl_num_updates, args)
+            all_offspring_batch.append(offsprings_task)
         
         # put all intermediate policies into all_sample_batch for EP update
         all_sample_batch = [] 
-        # last_offspring_batch = [None] * len(processes) 
+        last_offspring_batch = [None] * len(task_batch) 
         # only the policies with iteration % update_iter = 0 are inserted into offspring_batch for population update
         # after warm-up stage, it's equivalent to the last_offspring_batch
+        # opt_graph.weights[all_offspring_batch[2][-1].optgraph_id]
         offspring_batch = [] 
         for task_id in range(len(task_batch)):
             offsprings = all_offspring_batch[task_id]
@@ -130,26 +128,35 @@ def run(args):
             last_offspring_batch[task_id] = offsprings[-1]
 
         # finished_event.set()
-
+        print_info('Batch Results:')
+        for i in range(len(last_offspring_batch)):
+            print_info(
+              'objs = {}, weight = {}'.format(
+                last_offspring_batch[i].objs,
+                task_batch[last_offspring_batch[i].index_task].scalarization.weights
+              )
+            )
+        
+        total_batch.append(last_offspring_batch)
         # ----------------------> Update EP <------------------------ #
-        ep.update(all_sample_batch)
-        population.update(offspring_batch)
-
+        external_pareto.update(all_sample_batch)
+        population.population.extend(offspring_batch)
         # -------------------> Task Selection for Next Stage/Evaluation <--------------------- #
-
+        last_scalarization_batch=scalarization_batch
         selected_samples, scalarization_batch, predicted_offspring_objs = \
-            population.prediction_guided_selection(args, ep, opt_graph, scalarization_template)
-
-        print_info('Selected Tasks:')
+            population.prediction_guided_task_selection(args, external_pareto, opt_graph, scalarization_template)
+        print('Selected Tasks:')
         for i in range(len(selected_samples)):
             print_info('objs = {}, weight = {}'.format(selected_samples[i].objs, scalarization_batch[i].weights))
-
+        
         iteration = min(iteration + rl_num_updates, total_num_updates)
 
         rl_num_updates = args.update_iter
 
-    print('begin evaluation')
-    # Evaluate final policies, create pareto front
-    # TODO: Add functions for these
+    print('begin evaluation and plots')
+
+    policy_heatmap(last_offspring_batch,last_scalarization_batch,args)
+    plot_pareto(last_offspring_batch, model_cal, args)
+    
     print("DONE!")
 

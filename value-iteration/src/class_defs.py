@@ -1,3 +1,7 @@
+"""
+Global class definitions. Inspired by github.com/mit-gfx/PGMORL.
+"""
+
 import numpy as np
 from utils import *
 from abc import abstractmethod
@@ -31,11 +35,11 @@ class WeightedSumScalarization(ScalarizationFunction):
         pass
 
     def evaluate(self, objs):
-        return (objs * self.weights).sum(axis = -1)
+        return (torch.tensor(objs) * self.weights).sum(axis = -1)
 
-'''
+"""
 Define a external pareto class storing all computed policies on the current pareto front.
-'''
+"""
 class EP:
     def __init__(self):
         self.obj_batch = np.array([])
@@ -54,15 +58,16 @@ class EP:
             self.obj_batch = np.vstack([self.obj_batch, sample.objs]) if len(self.obj_batch) > 0 else np.array([sample.objs])
 
         if len(self.obj_batch) == 0: return
+        
         ep_indices = get_ep_indices(self.obj_batch)
 
         self.index(ep_indices)
 
 
-'''
+"""
 OptGraph is a data structure to store the optimization history.
 The optimization history is a rooted forest, and is organized in a tree structure.
-'''
+"""
 class OptGraph:
     def __init__(self):
         self.weights = []
@@ -93,17 +98,20 @@ class Task:
         self.sample = Sample.copy_from(sample)
         self.scalarization = copy.deepcopy(scalarization)
         
-'''
+"""
 Sample is a policy with associated environment variables.
-'''
+"""
 class Sample:
-    def __init__(self, X_I, X_S, objs = None, optgraph_id = None):
+    def __init__(self, X_I, X_S, index_task, objs = None, optgraph_id = None):
         self.objs = objs
         self.X_I = X_I
         self.X_S = X_S 
-        self.val_I = objs[0] if objs else []
-        self.val_L = objs[1] if objs else []
-        self.policy = -1
+        self.index_task = index_task
+
+        self.val_I = np.asarray([objs[0]]) if objs else np.asarray([])
+        self.val_L = np.asarray([objs[1]]) if objs else np.asarray([]) 
+
+        self.policy = 0 # turns into list during evaluate_policy # TODO: fix style
         
         self.optgraph_id = optgraph_id
 
@@ -111,4 +119,4 @@ class Sample:
     def copy_from(cls, sample):
         objs = copy.deepcopy(sample.objs)
         optgraph_id = sample.optgraph_id
-        return cls(objs, optgraph_id)
+        return cls(sample.X_I,sample.X_S,sample.index_task,objs, optgraph_id)
