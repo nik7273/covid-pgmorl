@@ -1,3 +1,7 @@
+"""
+Multi-Objective Policy Optimization thru Value Iteration.
+"""
+
 import numpy as np
 from copy import copy, deepcopy
 from scipy.stats import poisson
