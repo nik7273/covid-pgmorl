@@ -28,9 +28,6 @@ def mopg(env, task_list, m, eval_num):
     # objs = evaluate_policy(env, new_ddqn, num_evals = 50)
     objs = evaluate_policy(env, new_ddqn, eval_num)
     print('task id = {}, objs = {}, weighted objs = {}'.format(i, objs, np.matmul(objs,weights.weights.numpy())))
-    '''
-    Bowei : Output size not confirmed, expected to be a 2 * 1 vector of objective values
-    '''
 
     '''
     Data organization still need to be confirmed here
